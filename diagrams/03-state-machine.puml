@@ -1,0 +1,55 @@
+@startuml
+' State machine: contract status model
+' Statuses and rules are generic / illustrative.
+
+skinparam defaultFontName "Segoe UI"
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 8
+skinparam ArrowColor #2F5D8A
+skinparam ArrowThickness 1.1
+skinparam StateBackgroundColor #EAF1F8
+skinparam StateBorderColor #2F5D8A
+skinparam NoteBackgroundColor #FFFBE6
+skinparam NoteBorderColor #C9A227
+
+title Статусная модель договора хранения\n(обезличено)
+
+state "Черновик" as DRAFT
+state "Открыт" as OPEN
+state "Активен" as ACTIVE
+state "Приостановлен" as SUSPENDED
+state "Закрывается" as CLOSING
+state "Закрыт" as CLOSED
+state "Отменён" as CANCELLED
+
+[*] --> DRAFT : создать
+DRAFT --> OPEN : согласовать\nи подписать
+OPEN --> ACTIVE : счёт открыт\nи остаток подтверждён
+ACTIVE --> SUSPENDED : арест / блокировка\n/ решение комплаенса
+SUSPENDED --> ACTIVE : ограничения сняты
+ACTIVE --> CLOSING : заявка на закрытие
+CLOSING --> CLOSED : остаток = 0\nи ордера завершены
+CLOSING --> ACTIVE : остаток > 0\n/ отказ в закрытии
+DRAFT --> CANCELLED : отменить\nдо активации
+OPEN --> CANCELLED : отменить\nдо активации
+CLOSED --> [*]
+CANCELLED --> [*]
+
+note right of CLOSING
+  **Guard-условия перехода:**
+  — остаток по счёту = 0;
+  — нет активных ордеров;
+  — нет арестов и блокировок;
+  — комиссия начислена;
+  — финальная выписка сформирована.
+end note
+
+note bottom of SUSPENDED
+  В состоянии «Приостановлен»
+  операции приёма и выдачи
+  блокируются, но договор
+  не закрывается.
+end note
+
+@enduml

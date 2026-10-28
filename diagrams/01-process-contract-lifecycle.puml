@@ -1,0 +1,89 @@
+@startuml
+' Process landscape: contract lifecycle and precious metals operations
+' All names, identifiers and business rules are anonymized / illustrative.
+
+skinparam defaultFontName "Segoe UI"
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 8
+skinparam swimlaneWidth 195
+skinparam ArrowColor #2F5D8A
+skinparam ArrowThickness 1.1
+skinparam ActivityBackgroundColor #EAF1F8
+skinparam ActivityBorderColor #2F5D8A
+skinparam ActivityDiamondBackgroundColor #FFF4E5
+skinparam ActivityDiamondBorderColor #B26A00
+skinparam ActivityStartColor #2F5D8A
+skinparam ActivityEndColor #2F5D8A
+skinparam NoteBackgroundColor #FFFBE6
+skinparam NoteBorderColor #C9A227
+
+title Процессный ландшафт: договор хранения и операции с металлом\n(упрощённая BPMN-нотация, обезличено)
+
+|Клиент|
+start
+:Подать заявку\nна договор хранения;
+
+|Фронт-офис|
+:Проверить комплектность\nдокументов и реквизиты;
+if (Документы валидны?) then (да)
+  :Создать договор\nв статусе «Черновик»;
+  |АБС|
+  :Открыть счёт\nи зафиксировать реквизиты;
+  :Присвоить номер счёта\n(маска по типу клиента);
+  |Касса|
+  :Принять или выдать\nценности / металл;
+  :Подтвердить операцию\nи распечатать документы;
+  |АБС|
+  :Проверить остаток\nи провести сверку;
+  if (Остатки совпадают?) then (да)
+    :Начислить комиссию;
+    :Сформировать выписку;
+    |Фронт-офис|
+    :Активировать договор;
+    :Передать документы клиенту;
+  else (нет)
+    |АБС|
+    :Зафиксировать расхождение;
+    :Создать инцидент\nна ручной разбор;
+    |Фронт-офис|
+    :Уведомить клиента\nо задержке;
+  endif
+else (нет)
+  |Фронт-офис|
+  :Вернуть заявку\nна доработку;
+  :Зафиксировать причину отказа;
+endif
+
+|Клиент|
+:Получить уведомление\nо результате;
+
+|Фронт-офис|
+if (Клиент закрывает договор?) then (да)
+  :Подать заявку на закрытие;
+  |АБС|
+  :Проверить остаток,\nаресты и активные ордера;
+  if (Остаток = 0 и ограничений нет?) then (да)
+    :Закрыть счёт и договор;
+    :Сформировать финальную выписку;
+  else (нет)
+    :Вернуть ошибку\nс причиной;
+    |Фронт-офис|
+    :Сообщить клиенту,\nчто нужно сделать;
+  endif
+else (нет)
+  |Фронт-офис|
+  :Продолжить обслуживание;
+endif
+
+stop
+
+note right
+  **Легенда**
+  — Дорожки: клиент, фронт-офис, АБС, касса.
+  — Проверки: валидность документов, остаток, аресты, активные ордера.
+  — Исключения: расхождение остатков, отказ, повторная операция.
+  — Все названия систем и правила обезличены.
+end note
+
+@enduml

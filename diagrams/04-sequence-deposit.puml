@@ -1,0 +1,114 @@
+@startuml
+' Sequence diagram: opening a contract and depositing metal
+' Endpoints, fields and statuses are generic / illustrative.
+
+skinparam defaultFontName "Segoe UI"
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 6
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+skinparam ArrowColor #2F5D8A
+skinparam ArrowThickness 1.1
+skinparam ParticipantBackgroundColor #EAF1F8
+skinparam ParticipantBorderColor #2F5D8A
+skinparam ActorBackgroundColor #EAF1F8
+skinparam ActorBorderColor #2F5D8A
+skinparam NoteBackgroundColor #FFFBE6
+skinparam NoteBorderColor #C9A227
+skinparam SequenceGroupBackgroundColor #F7F9FC
+skinparam SequenceGroupBorderColor #B8C6D6
+
+title Последовательность: открытие договора и внесение металла\n(обезличено)
+
+autonumber
+
+actor "Клиент" as Client
+participant "Фронт-офис" as FO
+participant "АБС" as ABS
+participant "Кассовая\nсистема" as CASH
+participant "Процессинг" as PROC
+
+== 1. Открытие договора и счёта ==
+
+Client -> FO : Заявка на договор хранения
+FO -> ABS : POST /contracts\nIdempotency-Key, X-Request-ID
+activate ABS
+ABS --> FO : 201 Created\n{ contractId, status = DRAFT }
+deactivate ABS
+
+FO -> ABS : POST /contracts/{contractId}/accounts\n{ accountType, currency }
+activate ABS
+ABS --> FO : 201 Created\n{ accountId, accountNumberMask }
+deactivate ABS
+
+FO --> Client : Договор и счёт открыты
+
+== 2. Внесение металла ==
+
+Client -> CASH : Сдать металл / ценности
+CASH -> ABS : GET /accounts/{accountId}/balance
+ABS --> CASH : 200 OK\n{ balance, currency, status }
+
+CASH -> PROC : POST /metal-operations\n{ operationId, metalCode, weight }\nIdempotency-Key
+activate PROC
+PROC --> CASH : 202 Accepted\n{ operationId, status = PENDING }
+deactivate PROC
+
+loop Пока status = PENDING (polling, не чаще 1 раза в 5 секунд)
+  CASH -> PROC : GET /operations/{operationId}
+  PROC --> CASH : 200 OK\n{ status, confirmedWeight }
+end
+
+alt status = CONFIRMED
+  CASH -> ABS : POST /accounts/{accountId}/operations\n{ operationId, weight, direction = IN }
+  ABS --> CASH : 201 Created\n{ balance }
+  CASH --> Client : Металл принят, документы выданы
+else status = REJECTED или TIMEOUT
+  CASH -> ABS : POST /integration-incidents\n{ operationId, reason }
+  ABS --> CASH : 201 Created\n{ incidentId }
+  CASH --> Client : Операция требует ручного разбора
+end
+
+== 3. Сверка и комиссия ==
+
+ABS -> PROC : GET /operations/{operationId}/reconciliation
+PROC --> ABS : 200 OK\n{ confirmedWeight, status }
+
+alt Остатки не совпадают
+  ABS -> ABS : Зафиксировать расхождение\nи создать инцидент
+  note right of ABS
+    Ручной разбор: сверить
+    данные АБС и кассовой системы,
+    при необходимости — сторно.
+  end note
+else Остатки совпадают
+  ABS -> PROC : POST /commissions\n{ contractId, period, amount }
+  PROC --> ABS : 201 Created\n{ commissionId, status }
+end
+
+== 4. Закрытие договора ==
+
+Client -> FO : Заявка на закрытие
+FO -> ABS : POST /contracts/{contractId}/close\nIdempotency-Key
+activate ABS
+ABS -> ABS : Проверить остаток,\nаресты и активные ордера
+alt Остаток = 0 и ограничений нет
+  ABS --> FO : 200 OK\n{ status = CLOSED }
+  FO --> Client : Договор закрыт, выписка сформирована
+else Остаток > 0 или есть ограничения
+  ABS --> FO : 409 Conflict\n{ code, message, details }
+  FO --> Client : Показать причину и дальнейшие шаги
+end
+deactivate ABS
+
+note over FO, PROC
+  **Контрактные правила:**
+  — идемпотентность по Idempotency-Key;
+  — retry с экспоненциальной задержкой;
+  — таймаут и безопасное повторение;
+  — единый формат ошибок Problem Details;
+  — корреляция по X-Request-ID.
+end note
+
+@enduml

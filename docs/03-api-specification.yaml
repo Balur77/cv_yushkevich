@@ -1,0 +1,1058 @@
+openapi: 3.0.3
+info:
+  title: Contract Storage API (portfolio, anonymized)
+  version: 1.0.0
+  description: |
+    Обезличенный пример контракта для банковского процесса «договоры хранения
+    ценностей и операции с драгоценными металлами».
+
+    Демонстрирует:
+    - идемпотентность команд;
+    - единый формат ошибок;
+    - асинхронную обработку операций;
+    - статусные модели и guard-условия;
+    - корреляцию запросов по `X-Request-ID`.
+
+    Все названия, пути и данные — вымышленные. Контракт не относится к реальной
+    системе банка.
+  contact:
+    name: Vladislav Yushkevich
+    url: https://github.com/yushkevich-sa
+    email: yv10082006@gmail.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.example-bank.local/v1
+    description: Демонстрационный контур (не существует)
+
+tags:
+  - name: Contracts
+    description: Договоры хранения
+  - name: Accounts
+    description: Счета и остатки
+  - name: Operations
+    description: Операции с ценностями и металлом
+  - name: Commissions
+    description: Комиссии
+  - name: Statements
+    description: Выписки
+  - name: System
+    description: Служебные методы
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Проверка доступности сервиса
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: Сервис доступен
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, version]
+                properties:
+                  status:
+                    type: string
+                    enum: [UP, DEGRADED, DOWN]
+                  version:
+                    type: string
+                    example: 1.0.0
+
+  /contracts:
+    get:
+      tags: [Contracts]
+      summary: Список договоров
+      operationId: listContracts
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          description: Фильтр по статусу
+          schema:
+            $ref: '#/components/schemas/ContractStatus'
+        - name: clientId
+          in: query
+          description: Идентификатор клиента
+          schema:
+            type: string
+            format: uuid
+        - name: dateFrom
+          in: query
+          description: Дата открытия, с (ISO 8601)
+          schema:
+            type: string
+            format: date
+        - name: dateTo
+          in: query
+          description: Дата открытия, по (ISO 8601)
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Список договоров
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedContracts'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Contracts]
+      summary: Создать договор
+      description: |
+        Создаёт договор в статусе `DRAFT`. Операция идемпотентна:
+        повторный вызов с тем же `Idempotency-Key` возвращает исходный результат.
+      operationId: createContract
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContractCreateRequest'
+            examples:
+              createContract:
+                summary: Типовой запрос
+                value:
+                  clientId: 6f1c2a9e-3b7d-4e21-9c5a-1a2b3c4d5e6f
+                  contractType: STORAGE
+                  currency: BYN
+                  externalNumber: ST-2026-000123
+      responses:
+        '201':
+          description: Договор создан
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            Location:
+              description: Ссылка на созданный договор
+              schema:
+                type: string
+                format: uri
+                example: /v1/contracts/8a7b6c5d-4e3f-2a1b-9c8d-7e6f5a4b3c2d
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /contracts/{contractId}:
+    get:
+      tags: [Contracts]
+      summary: Получить договор
+      operationId: getContract
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+      responses:
+        '200':
+          description: Договор найден
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /contracts/{contractId}/activate:
+    post:
+      tags: [Contracts]
+      summary: Активировать договор
+      description: |
+        Переводит договор в `ACTIVE`. Требуется открытый счёт и подтверждённый
+        остаток. При невыполнении условий возвращается `409 Conflict`.
+      operationId: activateContract
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Договор активирован
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /contracts/{contractId}/close:
+    post:
+      tags: [Contracts]
+      summary: Закрыть договор
+      description: |
+        Запускает закрытие. Guard-условия:
+        - остаток по счёту = 0;
+        - нет активных ордеров;
+        - нет арестов и блокировок;
+        - комиссия начислена.
+      operationId: closeContract
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          description: Договор закрыт
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /contracts/{contractId}/accounts:
+    get:
+      tags: [Accounts]
+      summary: Счета по договору
+      operationId: listContractAccounts
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+      responses:
+        '200':
+          description: Список счетов
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Account'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    post:
+      tags: [Accounts]
+      summary: Открыть счёт по договору
+      operationId: createAccount
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountCreateRequest'
+      responses:
+        '201':
+          description: Счёт открыт
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /accounts/{accountId}:
+    get:
+      tags: [Accounts]
+      summary: Получить счёт и остаток
+      operationId: getAccount
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+      responses:
+        '200':
+          description: Счёт найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /accounts/{accountId}/operations:
+    get:
+      tags: [Operations]
+      summary: История операций по счёту
+      operationId: listOperations
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/OperationStatus'
+        - name: type
+          in: query
+          schema:
+            $ref: '#/components/schemas/OperationType'
+      responses:
+        '200':
+          description: Список операций
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedOperations'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    post:
+      tags: [Operations]
+      summary: Создать операцию внесения или выдачи
+      description: |
+        Создаёт асинхронную операцию. Возвращает `202 Accepted` и `operationId`.
+        Повторный вызов с тем же `Idempotency-Key` не создаёт дубль.
+      operationId: createOperation
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperationCreateRequest'
+            examples:
+              deposit:
+                summary: Внесение металла
+                value:
+                  operationType: DEPOSIT
+                  metalCode: XAU
+                  weight: 12.500000
+                  amount: 0
+                  currency: BYN
+                  externalId: CASH-OP-2026-000456
+      responses:
+        '202':
+          description: Операция принята в обработку
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/X-Request-ID'
+            Location:
+              description: Ссылка на статус операции
+              schema:
+                type: string
+                format: uri
+                example: /v1/operations/2b3c4d5e-6f7a-8b9c-0d1e-2f3a4b5c6d7e
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /operations/{operationId}:
+    get:
+      tags: [Operations]
+      summary: Получить статус операции
+      operationId: getOperation
+      parameters:
+        - $ref: '#/components/parameters/OperationId'
+      responses:
+        '200':
+          description: Статус операции
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /contracts/{contractId}/commissions:
+    post:
+      tags: [Commissions]
+      summary: Начислить комиссию
+      operationId: createCommission
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommissionCreateRequest'
+      responses:
+        '201':
+          description: Комиссия начислена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Commission'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /contracts/{contractId}/statements:
+    post:
+      tags: [Statements]
+      summary: Сформировать выписку
+      operationId: createStatement
+      parameters:
+        - $ref: '#/components/parameters/ContractId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatementCreateRequest'
+      responses:
+        '202':
+          description: Выписка поставлена в очередь
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Statement'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    mutualTLS:
+      type: apiKey
+      in: header
+      name: X-Client-Cert
+      description: mTLS / клиентский сертификат для межсистемных интеграций (упрощённо для OpenAPI 3.0)
+
+  parameters:
+    ContractId:
+      name: contractId
+      in: path
+      required: true
+      description: Идентификатор договора
+      schema:
+        type: string
+        format: uuid
+    AccountId:
+      name: accountId
+      in: path
+      required: true
+      description: Идентификатор счёта
+      schema:
+        type: string
+        format: uuid
+    OperationId:
+      name: operationId
+      in: path
+      required: true
+      description: Идентификатор операции
+      schema:
+        type: string
+        format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Уникальный ключ команды. Повторный запрос с тем же ключом возвращает
+        исходный результат и не создаёт дубль.
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+        example: 3f9c1a7e-2b4d-4c8e-9f10-5a6b7c8d9e0f
+    XRequestId:
+      name: X-Request-ID
+      in: header
+      required: false
+      description: Идентификатор запроса для сквозной корреляции
+      schema:
+        type: string
+        maxLength: 128
+        example: req-2026-10-29-000001
+    Page:
+      name: page
+      in: query
+      description: Номер страницы, начиная с 0
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    PageSize:
+      name: pageSize
+      in: query
+      description: Размер страницы
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  headers:
+    X-Request-ID:
+      description: Идентификатор запроса
+      schema:
+        type: string
+        example: req-2026-10-29-000001
+
+  responses:
+    BadRequest:
+      description: Некорректный запрос
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Не аутентифицирован
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: Недостаточно прав
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Объект не найден
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: Конфликт состояния или дубль
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnprocessableEntity:
+      description: Ошибка бизнес-валидации
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ValidationProblem'
+    TooManyRequests:
+      description: Превышен лимит запросов
+      headers:
+        Retry-After:
+          description: Через сколько секунд повторить
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    InternalError:
+      description: Внутренняя ошибка
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    ServiceUnavailable:
+      description: Сервис недоступен
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    ContractStatus:
+      type: string
+      enum: [DRAFT, OPEN, ACTIVE, SUSPENDED, CLOSING, CLOSED, CANCELLED]
+      description: Статус договора
+
+    ContractType:
+      type: string
+      enum: [STORAGE, SAFE_DEPOSIT_BOX, METAL_ACCOUNT]
+      description: Тип договора
+
+    Contract:
+      type: object
+      required: [contractId, clientId, externalNumber, contractType, status, currency, openDate]
+      properties:
+        contractId:
+          type: string
+          format: uuid
+        clientId:
+          type: string
+          format: uuid
+        externalNumber:
+          type: string
+          maxLength: 64
+          example: ST-2026-000123
+        contractType:
+          $ref: '#/components/schemas/ContractType'
+        status:
+          $ref: '#/components/schemas/ContractStatus'
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          example: BYN
+        openDate:
+          type: string
+          format: date
+        closeDate:
+          type: string
+          format: date
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ContractCreateRequest:
+      type: object
+      required: [clientId, contractType, currency]
+      properties:
+        clientId:
+          type: string
+          format: uuid
+        contractType:
+          $ref: '#/components/schemas/ContractType'
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          example: BYN
+        externalNumber:
+          type: string
+          maxLength: 64
+          description: Внешний номер договора, если есть
+        comment:
+          type: string
+          maxLength: 500
+
+    AccountStatus:
+      type: string
+      enum: [OPEN, BLOCKED, CLOSING, CLOSED]
+      description: Статус счёта
+
+    AccountType:
+      type: string
+      enum: [STORAGE, METAL, COMMISSION, TRANSIT]
+      description: Тип счёта
+
+    Account:
+      type: object
+      required: [accountId, contractId, accountType, accountNumberMask, currency, balance, status]
+      properties:
+        accountId:
+          type: string
+          format: uuid
+        contractId:
+          type: string
+          format: uuid
+        accountType:
+          $ref: '#/components/schemas/AccountType'
+        accountNumberMask:
+          type: string
+          example: '**** **** **** 1234'
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          example: BYN
+        balance:
+          type: number
+          format: double
+          example: 12500.00
+        status:
+          $ref: '#/components/schemas/AccountStatus'
+        openedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    AccountCreateRequest:
+      type: object
+      required: [accountType, currency]
+      properties:
+        accountType:
+          $ref: '#/components/schemas/AccountType'
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          example: BYN
+        comment:
+          type: string
+          maxLength: 500
+
+    OperationType:
+      type: string
+      enum: [DEPOSIT, WITHDRAWAL, TRANSFER, COMMISSION]
+      description: Тип операции
+
+    OperationStatus:
+      type: string
+      enum: [PENDING, CONFIRMED, REJECTED, CANCELLED, MANUAL_REVIEW]
+      description: Статус операции
+
+    MetalCode:
+      type: string
+      enum: [XAU, XAG, XPT, XPD]
+      description: Код драгоценного металла (ISO 4217)
+
+    Operation:
+      type: object
+      required: [operationId, accountId, operationType, metalCode, weight, status, requestedAt]
+      properties:
+        operationId:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        externalId:
+          type: string
+          maxLength: 128
+        operationType:
+          $ref: '#/components/schemas/OperationType'
+        metalCode:
+          $ref: '#/components/schemas/MetalCode'
+        weight:
+          type: number
+          format: double
+          description: Вес в граммах, точность 6 знаков
+          example: 12.500000
+        amount:
+          type: number
+          format: double
+          description: Сумма в валюте операции
+          example: 0
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          example: BYN
+        status:
+          $ref: '#/components/schemas/OperationStatus'
+        requestedAt:
+          type: string
+          format: date-time
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
+        error:
+          $ref: '#/components/schemas/Problem'
+          nullable: true
+
+    OperationCreateRequest:
+      type: object
+      required: [operationType, metalCode, weight, currency]
+      properties:
+        operationType:
+          $ref: '#/components/schemas/OperationType'
+        metalCode:
+          $ref: '#/components/schemas/MetalCode'
+        weight:
+          type: number
+          format: double
+          minimum: 0.000001
+          example: 12.500000
+        amount:
+          type: number
+          format: double
+          minimum: 0
+          description: Сумма, если операция денежная
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          example: BYN
+        externalId:
+          type: string
+          maxLength: 128
+          description: Идентификатор операции в смежной системе
+
+    Commission:
+      type: object
+      required: [commissionId, contractId, periodFrom, periodTo, amount, currency, status]
+      properties:
+        commissionId:
+          type: string
+          format: uuid
+        contractId:
+          type: string
+          format: uuid
+        periodFrom:
+          type: string
+          format: date
+        periodTo:
+          type: string
+          format: date
+        amount:
+          type: number
+          format: double
+          example: 45.50
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          example: BYN
+        status:
+          type: string
+          enum: [CALCULATED, CHARGED, FAILED]
+        calculatedAt:
+          type: string
+          format: date-time
+
+    CommissionCreateRequest:
+      type: object
+      required: [periodFrom, periodTo]
+      properties:
+        periodFrom:
+          type: string
+          format: date
+        periodTo:
+          type: string
+          format: date
+        amount:
+          type: number
+          format: double
+          minimum: 0
+          description: Если сумма известна заранее; иначе рассчитывается сервисом
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+
+    Statement:
+      type: object
+      required: [statementId, contractId, periodFrom, periodTo, format, status]
+      properties:
+        statementId:
+          type: string
+          format: uuid
+        contractId:
+          type: string
+          format: uuid
+        periodFrom:
+          type: string
+          format: date
+        periodTo:
+          type: string
+          format: date
+        format:
+          type: string
+          enum: [PDF, XLSX, CSV]
+        status:
+          type: string
+          enum: [QUEUED, GENERATING, READY, FAILED]
+        fileUrl:
+          type: string
+          format: uri
+          nullable: true
+        generatedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    StatementCreateRequest:
+      type: object
+      required: [periodFrom, periodTo, format]
+      properties:
+        periodFrom:
+          type: string
+          format: date
+        periodTo:
+          type: string
+          format: date
+        format:
+          type: string
+          enum: [PDF, XLSX, CSV]
+
+    Problem:
+      type: object
+      required: [type, title, status, code, requestId]
+      properties:
+        type:
+          type: string
+          format: uri
+          example: https://api.example-bank.local/problems/conflict
+        title:
+          type: string
+          example: Conflict
+        status:
+          type: integer
+          example: 409
+        code:
+          type: string
+          example: CONTRACT_HAS_BALANCE
+        message:
+          type: string
+          example: "Договор нельзя закрыть: на счёте есть остаток"
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              reason:
+                type: string
+        requestId:
+          type: string
+          example: req-2026-10-29-000001
+        timestamp:
+          type: string
+          format: date-time
+
+    ValidationProblem:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            errors:
+              type: array
+              items:
+                type: object
+                required: [field, message]
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+                  rejectedValue:
+                    nullable: true
+
+    PaginatedContracts:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Contract'
+        page:
+          type: integer
+          example: 0
+        pageSize:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 137
+
+    PaginatedOperations:
+      type: object
+      required: [items, page, pageSize, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Operation'
+        page:
+          type: integer
+          example: 0
+        pageSize:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 42

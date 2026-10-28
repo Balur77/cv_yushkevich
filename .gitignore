@@ -1,0 +1,29 @@
+# Java / PlantUML
+plantuml.jar
+*.jar
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Logs and temp
+*.log
+*.tmp
+~$*
+
+# Local secrets / env
+.env
+.env.*
+!.env.example

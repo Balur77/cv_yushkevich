@@ -1,0 +1,132 @@
+@startuml
+' Logical data model: contract storage and precious metals
+' All entities and fields are generic / illustrative.
+
+skinparam defaultFontName "Segoe UI"
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 6
+skinparam linetype ortho
+skinparam ArrowColor #2F5D8A
+skinparam ArrowThickness 1.1
+skinparam ClassBackgroundColor #F7F9FC
+skinparam ClassBorderColor #2F5D8A
+skinparam ClassHeaderBackgroundColor #EAF1F8
+skinparam NoteBackgroundColor #FFFBE6
+skinparam NoteBorderColor #C9A227
+
+hide circle
+hide empty members
+
+title Логическая модель данных: договор хранения и операции с металлом\n(обезличено)
+
+entity "CLIENT" as client {
+  * client_id : uuid <<PK>>
+  --
+  client_type : enum
+  display_name : string
+  tax_id : string
+  country_code : char(2)
+  status : enum
+  created_at : timestamp
+}
+
+entity "CONTRACT" as contract {
+  * contract_id : uuid <<PK>>
+  --
+  client_id : uuid <<FK>>
+  external_number : string
+  contract_type : enum
+  status : enum
+  open_date : date
+  close_date : date
+  currency : char(3)
+  created_at : timestamp
+}
+
+entity "ACCOUNT" as account {
+  * account_id : uuid <<PK>>
+  --
+  contract_id : uuid <<FK>>
+  account_type : enum
+  account_number_mask : string
+  currency : char(3)
+  balance : decimal(18,2)
+  status : enum
+  opened_at : timestamp
+  closed_at : timestamp
+}
+
+entity "METAL_OPERATION" as operation {
+  * operation_id : uuid <<PK>>
+  --
+  account_id : uuid <<FK>>
+  external_id : string
+  operation_type : enum
+  metal_code : enum
+  weight : decimal(18,6)
+  amount : decimal(18,2)
+  status : enum
+  requested_at : timestamp
+  confirmed_at : timestamp
+}
+
+entity "INTEGRATION_ORDER" as order {
+  * order_id : uuid <<PK>>
+  --
+  operation_id : uuid <<FK>>
+  target_system : enum
+  idempotency_key : string
+  status : enum
+  attempt_count : int
+  last_error_code : string
+  updated_at : timestamp
+}
+
+entity "COMMISSION" as commission {
+  * commission_id : uuid <<PK>>
+  --
+  contract_id : uuid <<FK>>
+  period_from : date
+  period_to : date
+  amount : decimal(18,2)
+  currency : char(3)
+  status : enum
+  calculated_at : timestamp
+}
+
+entity "STATEMENT" as statement {
+  * statement_id : uuid <<PK>>
+  --
+  contract_id : uuid <<FK>>
+  period_from : date
+  period_to : date
+  format : enum
+  file_ref : string
+  generated_at : timestamp
+  status : enum
+}
+
+client ||--o{ contract : "заключает"
+contract ||--o{ account : "открывает"
+account ||--o{ operation : "проводит"
+operation ||--o{ order : "порождает"
+contract ||--o{ commission : "начисляет"
+contract ||--o{ statement : "формирует"
+
+note right of order
+  **Integration order** — техническая
+  сущность для отслеживания
+  асинхронных вызовов:
+  retry, таймауты, ошибки,
+  ручной разбор.
+end note
+
+note bottom of account
+  Баланс — денормализованный
+  снимок для быстрых проверок;
+  источник истины — проводки
+  и сверка с кассовой системой.
+end note
+
+@enduml

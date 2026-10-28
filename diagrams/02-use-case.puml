@@ -1,0 +1,54 @@
+@startuml
+' Use case diagram: contract storage and precious metals
+' All names and actors are generic / anonymized.
+
+skinparam defaultFontName "Segoe UI"
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 8
+skinparam packageStyle rectangle
+skinparam ArrowColor #2F5D8A
+skinparam ArrowThickness 1.1
+skinparam ActorBackgroundColor #EAF1F8
+skinparam ActorBorderColor #2F5D8A
+skinparam UsecaseBackgroundColor #F7F9FC
+skinparam UsecaseBorderColor #2F5D8A
+skinparam NoteBackgroundColor #FFFBE6
+skinparam NoteBorderColor #C9A227
+
+title Use case: договоры хранения и операции с драгоценными металлами\n(обезличено)
+
+left to right direction
+
+actor "Клиент" as Client
+actor "Сотрудник\nбанка" as EMP
+
+rectangle "Договоры хранения ценностей" {
+  usecase "Открыть договор" as UC_OPEN
+  usecase "Открыть счёт" as UC_ACCOUNT
+  usecase "Внести ценности" as UC_IN
+  usecase "Выдать ценности" as UC_OUT
+  usecase "Проверить остаток" as UC_BALANCE
+  usecase "Начислить комиссию" as UC_COMM
+  usecase "Сформировать выписку" as UC_STATEMENT
+  usecase "Закрыть договор" as UC_CLOSE
+  usecase "Заблокировать / разблокировать счёт" as UC_BLOCK
+}
+
+Client --> UC_OPEN
+Client --> UC_IN
+Client --> UC_OUT
+
+EMP --> UC_OPEN
+EMP --> UC_COMM
+EMP --> UC_CLOSE
+EMP --> UC_BLOCK
+
+UC_OPEN ..> UC_ACCOUNT : <<include>>
+UC_IN ..> UC_BALANCE : <<include>>
+UC_OUT ..> UC_BALANCE : <<include>>
+UC_CLOSE ..> UC_BALANCE : <<include>>
+UC_CLOSE ..> UC_STATEMENT : <<include>>
+UC_COMM ..> UC_BALANCE : <<include>>
+
+@enduml

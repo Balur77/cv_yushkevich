@@ -1,0 +1,63 @@
+@startuml
+' Integration landscape: contract storage and precious metals
+' All system names, protocols and flows are generic / illustrative.
+
+skinparam defaultFontName "Segoe UI"
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 8
+skinparam componentStyle rectangle
+skinparam ArrowColor #2F5D8A
+skinparam ArrowThickness 1.1
+skinparam ComponentBackgroundColor #EAF1F8
+skinparam ComponentBorderColor #2F5D8A
+skinparam InterfaceBackgroundColor #F7F9FC
+skinparam InterfaceBorderColor #2F5D8A
+skinparam NoteBackgroundColor #FFFBE6
+skinparam NoteBorderColor #C9A227
+
+title Карта интеграций: договоры хранения и операции с металлом\n(обезличено)
+
+package "Банковский контур" {
+  [Фронт-офис\n(рабочее место)] as FO
+  [АБС\n(учёт договоров и счетов)] as ABS
+  [Кассовая система] as CASH
+  [Интеграционная шина\n(маршрутизация, retry, логирование)] as ESB
+}
+
+package "Смежные системы" {
+  [Процессинг\n(операции с металлом)] as PROC
+  [DWH / BI\n(отчётность)] as DWH
+  [Сервис уведомлений] as NOTIFY
+}
+
+FO --> ESB : REST/JSON\nсинхронно
+CASH --> ESB : REST/JSON\nсинхронно
+ABS --> ESB : REST/JSON\nсинхронно
+ESB --> ABS : REST/JSON\nкоманды и запросы
+ESB --> CASH : REST/JSON\nкоманды и запросы
+ESB --> PROC : REST/JSON + async\nоперации, статусы
+PROC --> ESB : webhook / polling\nподтверждения
+ABS --> DWH : CDC / batch\nданные для отчётности
+ABS --> NOTIFY : события\nуведомления клиенту
+CASH --> NOTIFY : события\nстатусы операций
+
+note right of ESB
+  **Паттерны интеграции:**
+  — Idempotency-Key;
+  — retry с backoff;
+  — timeout и circuit breaker;
+  — корреляция по X-Request-ID;
+  — единый формат ошибок;
+  — журнал запросов и ответов.
+end note
+
+note bottom of PROC
+  Асинхронный контур:
+  операция принимается в обработку,
+  статус подтверждается polling
+  или webhook, расхождения
+  уходят в ручной разбор.
+end note
+
+@enduml
