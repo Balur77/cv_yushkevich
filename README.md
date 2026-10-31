@@ -1,4 +1,4 @@
-# Портфолио системного аналитика
+﻿# Портфолио системного аналитика
 
 Банковские интеграции: требования, BPMN/UML, OpenAPI, UAT.
 2+ года в банковских проектах, домен — АБС, касса, фронт-офис, договоры и счета.
@@ -53,7 +53,8 @@ BPMN 2.0 · UML · ERD · OpenAPI · REST/SOAP · SQL · Jira · Confluence · P
 
 ## Контакты
 
-- GitHub: [github.com/yushkevich-sa](https://github.com/yushkevich-sa)
+- GitHub: [github.com/Balur77/cv_yushkevich](https://github.com/Balur77/cv_yushkevich)
 - Email: [yv10082006@gmail.com](mailto:yv10082006@gmail.com)
 
 Лицензия: [MIT](LICENSE) для кода и шаблонов, CC BY 4.0 для текстов и схем.
+

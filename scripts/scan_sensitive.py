@@ -56,8 +56,8 @@ REGEXES = [
 # Known-safe exceptions (documentation examples, public contacts of the author).
 ALLOWLIST = {
     "yv10082006@gmail.com",
-    "https://github.com/yushkevich-sa",
-    "github.com/yushkevich-sa",
+    "https://github.com/Balur77/cv_yushkevich",
+    "github.com/Balur77/cv_yushkevich",
 }
 
 
